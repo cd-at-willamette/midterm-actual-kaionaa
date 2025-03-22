@@ -1,0 +1,224 @@
+---
+title: "DATA505 - Midterm"
+subtitle: "Characterizing Automobiles"
+author: "Kaiona Apio"
+date: "03/17/2025"
+
+format: 
+  html:  
+    theme:
+        light: flatly
+        dark: darkly
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+---
+
+# Setup
+
+-   Setup
+
+```{r libs, warning=FALSE}
+sh <- suppressPackageStartupMessages
+sh(library(tidyverse))
+sh(library(caret))
+sh(library(fastDummies))
+sh(library(class))
+sh(library(ISLR)) # for the "Auto" dataframe
+sh(library(moderndive))
+sh(library(dslabs))
+sh(library(tidytext))
+sh(library(pROC))
+```
+
+# Dataframe
+
+-   We use the `Auto` dataframe.
+
+```{r df}
+head(Auto)
+```
+
+-   It has the following variable names, which describe various attributes of automobiles.
+
+```{r df2}
+names(Auto)
+```
+
+# Multiple Regression
+
+-   Run a linear regression model with `mpg` as the dependent variable and `horsepower` and `year` as features (variables).
+-   Compute and comment on the RMSE.
+
+```{r regression}
+m1 = lm(mpg ~ horsepower + year, data = Auto)
+get_regression_table(m1)
+
+
+get_regression_points(m1) %>%
+    drop_na(residual) %>%
+    mutate(sq_residuals = residual^2) %>%
+    summarize(rmse = sqrt(mean(sq_residuals))) %>%
+    pluck("rmse")
+```
+
+> **Explanation:**
+>
+> The RMSE for this problem shows an average deviation of 4.3 by the predicted values when comparing them to the actual data points.
+
+# Feature Engineering
+
+-   Create 10 features based on the `name` column.
+-   Remove all rows with a missing value.
+-   Ensure only `mpg` and the engineered features remain.
+-   Compute and comment on the RMSE.
+
+```{r features}
+ftAuto = Auto %>%
+  mutate(
+    chevy = str_detect(name,"chevrolet"),
+    honda = str_detect(name,"honda"),
+    toyota = str_detect(name,"toyota"),
+    dodge = str_detect(name,"dodge"),
+    ford = str_detect(name,"ford"),
+    nissan = str_detect(name,"nissan"),
+    datsun = str_detect(name,"datsun"),
+    volvo = str_detect(name,"volvo"),
+    fiat = str_detect(name,"fiat"),
+    mazda = str_detect(name, "mazda")
+  )%>%
+  select(chevy, honda, toyota, dodge, ford, nissan, datsun, volvo, fiat, mazda, mpg)%>%
+  drop_na()
+
+head(ftAuto)
+
+m2=lm(mpg~chevy+honda+toyota+dodge+ford+nissan+datsun+volvo+fiat+mazda, data=ftAuto)
+get_regression_table(m2)
+  
+get_regression_points(m2) %>%
+    drop_na(residual) %>%
+    mutate(sq_residuals = residual^2) %>%
+    summarize(rmse = sqrt(mean(sq_residuals))) %>%
+    pluck("rmse")
+```
+
+> **Explanation:**
+>
+> I made it worse. There is a larger RMSE and therefore about a 2 mpg greater deviation in this model's predictions. I had a feeling that this would happen because gas mileage is fairly dependent on the weight and number of cylinders of a car which were both eliminated in feature engineering. I also generated 10 feature related to the make of each vehicle, but there can be many types of vehicles with varying mpg within each maker.
+
+# Classification
+
+-   Use either of $K$-NN or Naive Bayes to predict whether an automobile is a `chevrolet` or a `honda`.
+-   Explain your choice of technique.
+-   Report on your Kappa value.
+
+```{r classification}
+chAuto=Auto%>%
+  mutate(
+    make = as.factor(ifelse(str_detect(Auto$name, "chevrolet"), "chevrolet", ifelse(str_detect(Auto$name, "honda"), "honda",
+                        NA))))
+nachAuto=chAuto%>%
+  drop_na()
+
+#split
+set.seed(505)
+coll_index <- createDataPartition(nachAuto$make, p = 0.8, list = FALSE)
+atrain <- nachAuto[ coll_index, ]
+atest <- nachAuto[-coll_index, ]
+
+#fit
+fit <- train(make ~ .,
+             data = atrain, 
+             method = "knn",
+             tuneLength = 15,
+             metric = "Kappa",
+             trControl = trainControl(number = 5, method = "cv"))
+
+#confusion matrix
+print(confusionMatrix(predict(fit, atest),factor(atest$make)))
+```
+
+> **Explanation:**
+>
+> This model has a Kappa value of about 0.62 which is slightly better than random guessing. However, since the data set used is comprised of only Chevy and Honda vehicles, there is already a 50% chance of choosing the right make. Therefore, this is medium impressive...ish.
+
+# Binary Classification
+
+-   Predict whether a car is a `honda`.
+-   Use model weights.
+-   Display and comment on an ROC curve.
+
+```{r binary classification, warning=FALSE, message=FALSE}
+chAuto2=Auto%>%
+  mutate(
+    make = as.factor(ifelse(str_detect(Auto$name, "chevrolet"), "chevrolet", ifelse(str_detect(Auto$name, "honda"), "honda",
+                        "other"))))
+
+set.seed(505)
+honda_index <- createDataPartition(chAuto2$make, p = 0.8, list = FALSE)
+htrain <- chAuto2[ honda_index, ]
+htest <- chAuto2[-honda_index, ]
+
+weight_train = htrain %>% 
+  mutate(weights = ifelse(make == "honda", 1, 0))
+
+hfit <- train(make ~ .,
+             data = htrain, 
+             method = "knn",
+             tuneLength = 15,
+             metric = "Kappa",
+             trControl = trainControl(number = 5, method = "cv"))
+
+prob <- predict(hfit, newdata = htest, type = "prob")[,2]
+hRoc <- roc(htest$make, prob)
+hRoc
+AUC <-auc(hRoc)
+```
+
+> **Explanation:**
+>
+> The ROC Curve for this problem, shown below, has an Area Under the Curve of about 0.94, which suggests that the model will correctly predict the make as Honda fairly well.
+
+
+# Ethics
+
+-   Based on your analysis, comment on the [Clean Air Act of 1970 and Ammendments of 1977](https://www.epa.gov/clean-air-act-overview/evolution-clean-air-act)
+-   Discuss the civic reponsibilities of data scientists for:
+    -   Big Data and Human-Centered Computing
+    -   Democratic Institutions
+    -   Climate Change
+-   Provide at least one statistical measure for each, such as a RMSE, Kappa value, or ROC curve.
+
+##Big Data and Human-Centered Computing
+
+```{r big data}
+get_regression_points(m1) %>%
+    drop_na(residual) %>%
+    mutate(sq_residuals = residual^2) %>%
+    summarize(rmse = sqrt(mean(sq_residuals))) %>%
+    pluck("rmse")
+```
+
+> The RMSE in the code above shows the potential for the model to deviate 4.3 mpg from the actual data. If this model were used by an analyst in the vehicle industry, there is potential to generate an inaccurate mpg mean, which could affect CO2 emission compliance or generate unreliable marketing information that mislead consumers.
+> In relation to human-centered computing, as displayed by my feature engineering, more code does not always result more accurate results. Since there will always be potential for human error, models should be analyzed by teams or at least proofread.
+
+##Democratic Institutions
+
+```{r democracy}
+plot(fit, metric="Kappa")
+```
+
+> The Kappa value from the first classification problem is around 0.62 and shows some accuracy, but the plot above shows the value dropping as the number of nearest neighbors are included. This is simply because our dataset is smaller, and therefore unfit to advise a democratic institution's decision making. Large scale decisions and policies should be cautioned with an abundance of data, which this example lacks.
+
+##Climate Change
+
+```{r climate}
+ggroc(hRoc, colour = 'darkgreen', size = 2) +
+  ggtitle(paste0('ROC Curve ', '(AUC = ', AUC, ')'))+
+  theme_light()+
+  theme(plot.title = element_text(face = "bold"))
+```
+
+> When assessing data relating to climate change, it is crucial (in my opinion) to be as accurate as possible. My ROC was the most accurate method for today and so that is what I would suggest to a climate data analyst. Accurate models are needed since climate crisis is already devastating for many communities, and it will only worsen. In addition, there are many people who deny climate change and therefore the statistical analyses and models generated need to be as good as they can be. 
+
